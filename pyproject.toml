@@ -44,9 +44,13 @@ dev = [
 bedrock = [
     "langchain-aws>=1.5.0",
 ]
+# Notion export support: pip install "tradingagents[notion]"
+notion = [
+    "notion-client>=2.2.0",
+]
 
 [project.scripts]
-tradingagents = "cli.main:app"
+tradingagents = "cli.main:cli_entrypoint"
 
 [tool.setuptools.packages.find]
 include = ["tradingagents*", "cli*"]

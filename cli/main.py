@@ -760,9 +760,28 @@ def get_analysis_date():
             )
 
 
-def save_report_to_disk(final_state, ticker: str, save_path: Path):
+def save_report_to_disk(
+    final_state,
+    ticker: str,
+    save_path: Path,
+    *,
+    selections: dict | None = None,
+    config: dict | None = None,
+    decision_rating: str | None = None,
+):
     """Save the complete analysis report to disk (shared CLI/API writer)."""
-    return write_report_tree(final_state, ticker, save_path)
+    report_file = write_report_tree(final_state, ticker, save_path)
+    if selections is not None and config is not None:
+        from tradingagents.export.report_metadata import build_run_metadata, write_report_metadata
+
+        meta = build_run_metadata(
+            selections=selections,
+            config=config,
+            save_path=save_path,
+            decision_rating=decision_rating,
+        )
+        write_report_metadata(save_path, meta)
+    return report_file
 
 
 def display_complete_report(final_state):
@@ -1268,9 +1287,19 @@ def run_analysis(checkpoint: bool | None = None):
         ).strip()
         save_path = Path(save_path_str)
         try:
-            report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
+            report_file = save_report_to_disk(
+                final_state,
+                selections["ticker"],
+                save_path,
+                selections=selections,
+                config=config,
+            )
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+
+            export_choice = typer.prompt("\nExport to Notion?", default="N").strip().upper()
+            if export_choice in ("Y", "YES"):
+                _prompt_export_to_notion(save_path)
         except Exception as e:
             console.print(f"[red]Error saving report: {e}[/red]")
 
@@ -1280,7 +1309,55 @@ def run_analysis(checkpoint: bool | None = None):
         display_complete_report(final_state)
 
 
-@app.command()
+def _prompt_export_to_notion(report_dir: Path) -> None:
+    from tradingagents.export.notion_exporter import (
+        NotionExportError,
+        export_report_to_notion,
+        notion_configured,
+    )
+
+    if not notion_configured():
+        console.print(
+            "[yellow]Notion export skipped:[/yellow] set NOTION_API_KEY and NOTION_DATABASE_ID in .env, "
+            "then run [bold]tradingagents notion-schema[/bold] to map property names."
+        )
+        return
+    try:
+        url = export_report_to_notion(report_dir)
+        console.print(f"[green]✓ Exported to Notion:[/green] {url}")
+    except NotionExportError as e:
+        console.print(f"[red]Notion export failed:[/red] {e}")
+    except Exception as e:
+        console.print(f"[red]Notion export failed:[/red] {e}")
+
+
+@app.command("notion-schema")
+def notion_schema():
+    """List Notion database properties for manual .env mapping."""
+    from tradingagents.export.notion_exporter import NotionExportError, print_notion_schema
+
+    try:
+        print_notion_schema()
+    except NotionExportError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("export-notion")
+def export_notion(
+    report_dir: Path = typer.Argument(
+        ...,
+        help="Path to a saved report folder (contains complete_report.md)",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+):
+    """Export an existing report folder to Notion."""
+    _prompt_export_to_notion(report_dir)
+
+
+@app.command("analyze")
 def analyze(
     checkpoint: bool | None = typer.Option(
         None,
@@ -1313,5 +1390,20 @@ def analyze(
         raise typer.Exit(code=1) from None
 
 
-if __name__ == "__main__":
+_CLI_SUBCOMMANDS = frozenset({"analyze", "notion-schema", "export-notion"})
+
+
+def cli_entrypoint() -> None:
+    """Default to the analyze subcommand when no subcommand is given (backward compatible)."""
+    import sys
+
+    args = sys.argv[1:]
+    if not args:
+        sys.argv.insert(1, "analyze")
+    elif args[0] not in _CLI_SUBCOMMANDS and args[0] not in ("--help", "-h") and args[0].startswith("-"):
+        sys.argv.insert(1, "analyze")
     app()
+
+
+if __name__ == "__main__":
+    cli_entrypoint()
