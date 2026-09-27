@@ -30,7 +30,31 @@ from tradingagents.graph.analyst_execution import (
     build_analyst_execution_plan,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from cli.notion import prompt_export_to_notion
 from tradingagents.reporting import write_report_tree
+
+
+def _save_report_to_disk(
+    final_state,
+    ticker: str,
+    save_path: Path,
+    *,
+    selections: dict | None = None,
+    config: dict | None = None,
+    decision_rating: str | None = None,
+):
+    report_file = write_report_tree(final_state, ticker, save_path)
+    if selections is not None and config is not None:
+        from tradingagents.export.report_metadata import build_run_metadata, write_report_metadata
+
+        meta = build_run_metadata(
+            selections=selections,
+            config=config,
+            save_path=save_path,
+            decision_rating=decision_rating,
+        )
+        write_report_metadata(save_path, meta)
+    return report_file
 
 
 def _run_directory(config: dict, ticker: str, trade_date: str) -> Path:
@@ -381,9 +405,19 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
         ).strip()
         save_path = Path(save_path_str)
         try:
-            report_file = write_report_tree(final_state, selections["ticker"], save_path)
+            report_file = _save_report_to_disk(
+                final_state,
+                selections["ticker"],
+                save_path,
+                selections=selections,
+                config=config,
+            )
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+
+            export_choice = typer.prompt("\nExport to Notion?", default="N").strip().upper()
+            if export_choice in ("Y", "YES"):
+                prompt_export_to_notion(save_path)
         except Exception as e:
             console.print(f"[red]Error saving report: {e}[/red]")
 

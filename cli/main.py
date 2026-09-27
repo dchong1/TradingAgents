@@ -1,8 +1,10 @@
 import sys
+from pathlib import Path
 
 import typer
 
 from cli.display import console
+from cli.notion import prompt_export_to_notion
 from cli.run import run_analysis
 from tradingagents.backtest import iter_grid, run_backtest, summarize
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -53,6 +55,7 @@ def analyze(
         return
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
+
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     portfolio_context = None
@@ -76,6 +79,32 @@ def analyze(
             err=True,
         )
         raise typer.Exit(code=1) from None
+
+
+@app.command("notion-schema")
+def notion_schema():
+    """List Notion database properties for manual .env mapping."""
+    from tradingagents.export.notion_exporter import NotionExportError, print_notion_schema
+
+    try:
+        print_notion_schema()
+    except NotionExportError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("export-notion")
+def export_notion(
+    report_dir: Path = typer.Argument(
+        ...,
+        help="Path to a saved report folder (contains complete_report.md)",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+):
+    """Export an existing report folder to Notion."""
+    prompt_export_to_notion(report_dir)
 
 
 @app.command()
